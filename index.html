@@ -24,7 +24,7 @@
   button { padding:11px 18px; border:0; border-radius:10px; background:#4f8cff; color:#fff; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.5; cursor:default; }
   #gate { position:fixed; inset:0; background:#0f1117; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; }
-  #gate input { width:260px; flex:none; }
+  #gate input { width:260px; flex:0 0 auto; height:auto; align-self:center; }
 </style>
 </head>
 <body>
@@ -44,7 +44,7 @@
 
 <div id="gate" style="display:none">
   <div style="font-size:14px;color:#8b90a0">Enter team password</div>
-  <input id="pw" type="password" placeholder="password">
+  <input id="pw" type="password" placeholder="password" onkeydown="if(event.key==='Enter')savePw()">
   <button onclick="savePw()">Enter</button>
 </div>
 
