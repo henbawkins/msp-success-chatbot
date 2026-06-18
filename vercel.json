@@ -1,0 +1,5 @@
+{
+  "functions": {
+    "api/ask.py": { "memory": 256, "maxDuration": 30 }
+  }
+}
