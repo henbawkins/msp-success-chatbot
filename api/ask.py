@@ -49,6 +49,18 @@ def retrieve(vec):
     return _post_json(url, {"query_embedding": vec, "match_count": MATCH_COUNT}, headers, timeout=30)
 
 
+def log_event(fields):
+    """Fire-and-forget usage log to Supabase. Never raises into the request path."""
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/chat_logs"
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                   "Content-Type": "application/json", "Prefer": "return=minimal"}
+        req = urllib.request.Request(url, data=json.dumps(fields).encode(), headers=headers)
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass
+
+
 def build_context(chunks):
     parts = []
     for c in chunks:
@@ -112,6 +124,7 @@ class handler(BaseHTTPRequestHandler):
             vec = embed_question(retrieval_query)
             chunks = retrieve(vec)
             if not chunks:
+                log_event({"question": question, "no_results": True, "num_sources": 0})
                 return self._send(200, {"answer": "The webinars don't cover that directly.", "sources": []})
             answer = ask_claude(question, build_context(chunks), history)
             seen, sources = set(), []
@@ -120,8 +133,15 @@ class handler(BaseHTTPRequestHandler):
                 if label and label not in seen:
                     seen.add(label)
                     sources.append({"label": label, "similarity": round(c["similarity"], 3)})
+            log_event({"question": question, "answer_len": len(answer),
+                       "top_source": sources[0]["label"] if sources else None,
+                       "top_sim": sources[0]["similarity"] if sources else None,
+                       "num_sources": len(sources)})
             return self._send(200, {"answer": answer, "sources": sources})
         except urllib.error.HTTPError as e:
-            return self._send(502, {"error": f"upstream {e.code}", "detail": e.read().decode()[:300]})
+            detail = e.read().decode()[:300]
+            log_event({"question": question, "error": f"upstream {e.code}: {detail[:150]}"})
+            return self._send(502, {"error": f"upstream {e.code}", "detail": detail})
         except Exception as e:
+            log_event({"question": question, "error": str(e)[:200]})
             return self._send(500, {"error": str(e)})
