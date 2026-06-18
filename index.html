@@ -19,6 +19,13 @@
   .user .bubble { background:#4f8cff; color:#fff; }
   .bot .bubble { background:#1a1d27; border:1px solid #262a36; }
   .sources { font-size:11px; color:#8b90a0; margin-top:6px; }
+  .copy-btn { display:inline-block; margin-top:8px; font-size:11px; padding:3px 9px; border-radius:6px;
+              background:transparent; border:1px solid #2a2e3c; color:#8b90a0; font-weight:500; }
+  .copy-btn:hover { color:#e8eaf0; border-color:#3a3f50; }
+  #chips { display:flex; flex-wrap:wrap; gap:8px; max-width:780px; width:100%; margin:0 auto; padding:0 20px 4px; }
+  .chip { font-size:12px; padding:7px 12px; border-radius:16px; background:#1a1d27; border:1px solid #2a2e3c;
+          color:#c2c6d2; cursor:pointer; font-weight:500; }
+  .chip:hover { border-color:#4f8cff; color:#fff; }
   form { display:flex; gap:8px; padding:16px 20px; border-top:1px solid #262a36; max-width:780px; width:100%; margin:0 auto; }
   input { flex:1; padding:11px 14px; border-radius:10px; border:1px solid #2a2e3c; background:#1a1d27; color:#e8eaf0; font-size:14px; }
   button { padding:11px 18px; border:0; border-radius:10px; background:#4f8cff; color:#fff; font-weight:600; cursor:pointer; }
@@ -37,8 +44,16 @@
   <div class="msg bot"><div class="bubble">Ask me anything covered in our Digital Marketing Hour webinars or the MSP Success Q&A dashboard — SEO, Google Business Profile, PPC, content, social, plus support/process questions. I'll only answer from what the team actually said and cite the source.</div></div>
 </div>
 
+<div id="chips">
+  <span class="chip">How do I set up a Google Business Profile for a new client?</span>
+  <span class="chip">How do I set up Bing Places?</span>
+  <span class="chip">Service-area business vs. physical address — which is better for local SEO?</span>
+  <span class="chip">How does GBP verification work?</span>
+  <span class="chip">Why does NAP consistency matter?</span>
+</div>
+
 <form id="f">
-  <input id="q" placeholder="e.g. Is a service-area business or a physical address better for local SEO?" autocomplete="off">
+  <input id="q" placeholder="Ask about SEO, GBP, Bing, or our onboarding process…" autocomplete="off">
   <button id="send" type="submit">Ask</button>
 </form>
 
@@ -50,7 +65,10 @@
 
 <script>
 let PW = localStorage.getItem("dmh_pw") || "";
+const history = [];               // [{role:"user"|"assistant", content:"..."}]
 const chat = document.getElementById("chat");
+const esc = s => s.replace(/</g,"&lt;");
+
 function add(role, html) {
   const d = document.createElement("div");
   d.className = "msg " + role;
@@ -58,35 +76,64 @@ function add(role, html) {
   chat.appendChild(d); chat.scrollTop = chat.scrollHeight;
   return d;
 }
+function addCopyButton(bubble, text) {
+  const b = document.createElement("button");
+  b.className = "copy-btn"; b.textContent = "Copy";
+  b.onclick = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      b.textContent = "Copied"; setTimeout(() => b.textContent = "Copy", 1500);
+    });
+  };
+  bubble.appendChild(document.createElement("br"));
+  bubble.appendChild(b);
+}
 function savePw() {
   PW = document.getElementById("pw").value;
   localStorage.setItem("dmh_pw", PW);
   document.getElementById("gate").style.display = "none";
 }
-document.getElementById("f").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const q = document.getElementById("q").value.trim();
+
+async function ask(q) {
+  q = q.trim();
   if (!q) return;
-  document.getElementById("q").value = "";
-  add("user", q.replace(/</g,"&lt;"));
+  document.getElementById("chips").style.display = "none";
+  add("user", esc(q));
   const btn = document.getElementById("send"); btn.disabled = true;
   const thinking = add("bot", "…thinking");
   try {
     const r = await fetch("/api/ask", {
       method: "POST", headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ question: q, password: PW })
+      body: JSON.stringify({ question: q, password: PW, history })
     });
     if (r.status === 401) { thinking.remove(); document.getElementById("gate").style.display="flex"; btn.disabled=false; return; }
     const d = await r.json();
-    let html = (d.answer || d.error || "Something went wrong.").replace(/</g,"&lt;").replace(/\n/g,"<br>");
+    const answer = d.answer || d.error || "Something went wrong.";
+    let html = esc(answer).replace(/\n/g,"<br>");
     if (d.sources && d.sources.length) {
-      html += '<div class="sources">Sources: ' + d.sources.map(s => s.label).join(" · ") + '</div>';
+      html += '<div class="sources">Sources: ' + d.sources.map(s => esc(s.label)).join(" · ") + '</div>';
     }
-    thinking.querySelector(".bubble").innerHTML = html;
+    const bubble = thinking.querySelector(".bubble");
+    bubble.innerHTML = html;
+    if (d.answer) {
+      addCopyButton(bubble, answer);
+      history.push({ role: "user", content: q });
+      history.push({ role: "assistant", content: answer });
+      if (history.length > 8) history.splice(0, history.length - 8);
+    }
   } catch (err) {
     thinking.querySelector(".bubble").textContent = "Network error.";
   }
   btn.disabled = false;
+}
+
+document.getElementById("f").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = document.getElementById("q");
+  const q = input.value; input.value = "";
+  ask(q);
+});
+document.querySelectorAll("#chips .chip").forEach(c => {
+  c.addEventListener("click", () => ask(c.textContent));
 });
 </script>
 </body>

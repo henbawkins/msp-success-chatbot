@@ -57,14 +57,21 @@ def build_context(chunks):
     return "\n\n---\n\n".join(parts)
 
 
-def ask_claude(question, context):
+def ask_claude(question, context, history=None):
     url = "https://api.anthropic.com/v1/messages"
     headers = {"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01",
                "Content-Type": "application/json"}
-    user_msg = (f"Here are relevant excerpts from past webinars:\n\n{context}\n\n"
-                f"Question: {question}\n\nAnswer using only these excerpts, and cite the webinar date(s).")
+    user_msg = (f"Here are relevant excerpts from our webinars and Q&A dashboard:\n\n{context}\n\n"
+                f"Question: {question}\n\nAnswer using only these excerpts, and cite the source label(s).")
+    messages = []
+    for turn in (history or []):
+        role = turn.get("role")
+        text = (turn.get("content") or "").strip()
+        if role in ("user", "assistant") and text:
+            messages.append({"role": role, "content": text})
+    messages.append({"role": "user", "content": user_msg})
     payload = {"model": CLAUDE_MODEL, "max_tokens": 1024, "system": SYSTEM_PROMPT,
-               "messages": [{"role": "user", "content": user_msg}]}
+               "messages": messages}
     d = _post_json(url, payload, headers, timeout=60)
     return "".join(b.get("text", "") for b in d.get("content", []))
 
@@ -90,12 +97,23 @@ class handler(BaseHTTPRequestHandler):
         if not question:
             return self._send(400, {"error": "no question"})
 
+        history = req.get("history") or []
+        if not isinstance(history, list):
+            history = []
+        history = history[-6:]  # cap context to the last few turns
+
+        # For retrieval, blend the previous user turn into the query so vague
+        # follow-ups ("what about Bing?") still pull relevant excerpts.
+        prev_user = next((t.get("content", "") for t in reversed(history)
+                          if t.get("role") == "user"), "")
+        retrieval_query = (prev_user + " " + question).strip() if prev_user else question
+
         try:
-            vec = embed_question(question)
+            vec = embed_question(retrieval_query)
             chunks = retrieve(vec)
             if not chunks:
                 return self._send(200, {"answer": "The webinars don't cover that directly.", "sources": []})
-            answer = ask_claude(question, build_context(chunks))
+            answer = ask_claude(question, build_context(chunks), history)
             seen, sources = set(), []
             for c in chunks:
                 label = c.get("webinar_title") or c.get("webinar_date")
